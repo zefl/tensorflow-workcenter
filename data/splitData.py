@@ -100,10 +100,9 @@ def split_data(raw_data_folder,train_percentage=0.8,test_percentage=0.2,validati
 
     
 if __name__ == "__main__":
-#    raw_datas = unzip_data()
-#    for raw_data in raw_datas:
-#        if not os.path.exists(raw_data):
-#            raise ValueError("Erro in unzipping file")
-#        else:
-#            split_data(raw_data, 0.85,0.15)
-    check_same_images("C:/Users/Florian/Documents/Tensorflow/workcenter/data/mouse_raw_data")
+   raw_datas = unzip_data()
+   for raw_data in raw_datas:
+       if not os.path.exists(raw_data):
+           raise ValueError("Erro in unzipping file")
+       else:
+           split_data(raw_data, 0.85,0.15)
