@@ -306,7 +306,13 @@ class LocationModel:
         # for each file (not each line) in the CSV file data . . .
         # (each image/.xml file pair can have more than one box, and therefore more than one line for that file in the CSV file)
         for singleFileData in csvFileDataList:
-            tfExample = self._createTfExample(singleFileData, path)
+            try:
+                tfExample = self._createTfExample(singleFileData, path)
+            except ValueError as error:
+                if error.args[0].find('is not in list'):
+                    raise ValueError('Labels of folder name and xml files do not match')
+                else:
+                    raise ValueError(error)
             tfRecordWriter.write(tfExample.SerializeToString())
         # end for
         tfRecordWriter.close()
@@ -395,11 +401,11 @@ class LocationModel:
 
 if __name__ == "__main__":
     cnn_model = LocationModel('mouse_detection_model')
-    #cnn_model.perpare_training('./data/train','./data/test')
+    cnn_model.perpare_training('./data/train','./data/test')
     #cnn_model.train()
-    current_model = "faster_rcnn_inception_v2_ownData_2018_9_18_17_0"
+    #current_model = "faster_rcnn_inception_v2_ownData_2018_9_18_17_0"
     #cnn_model.export_model(current_model)
-    cnn_model.eval_model(current_model)
+    #cnn_model.eval_model(current_model)
 
     
     

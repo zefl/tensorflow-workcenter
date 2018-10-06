@@ -105,4 +105,4 @@ if __name__ == "__main__":
        if not os.path.exists(raw_data):
            raise ValueError("Erro in unzipping file")
        else:
-           split_data(raw_data, 0.85,0.15)
+           split_data(raw_data,0.85,0.15)
