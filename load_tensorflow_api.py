@@ -28,8 +28,10 @@ def load_API(tensorflow_models_folder):
             protobuf_not_combiled = True
             #check if protobuf is already combiled on sytem
             for fname in os.listdir(protobuf_folder):
-                if fname.endswith('.py'):
+                if fname.endswith('.py') and fname != "__init__.py":
                     protobuf_not_combiled = False
+                #endif
+            #endfor
     		
             #combile Protobuf
             if protobuf_not_combiled:
@@ -39,17 +41,26 @@ def load_API(tensorflow_models_folder):
                     if not fname.endswith('.py'):
                         fname = os.path.join('object_detection/protos',fname)
                         #compile Protos one by one 
-                        proc  = subprocess.Popen(['"C:/Users/Florian/Documents/Tensorflow/tensorflow_api/protoc-3.5.1-win32/bin/protoc.exe"',fname,'--python_out=.'], cwd=run_folder,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-                outs, errs = proc.communicate()
-                if errs:
-                    raise ValueError(errs)
+                        #cmd  = "C:/Users/Florian/Documents/Tensorflow/tensorflow_api/protoc-3.5.1-win32/bin/protoc.exe" + str(fname) + ' --python_out=.'
+                        cmd = 'protoc ' + str(fname) + ' --python_out=.'
+						
+                        proc  = subprocess.Popen([cmd],cwd=str(run_folder), shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                        outs, errs = proc.communicate()
+                        if errs:
+                            raise ValueError(errs)
+                        #endif
+                    #endif
+                #endfor
             else:
                 print("Protobuf already compiled")
+            #endif
             print("Compile Protobuf complete")
         else:
             raise ValueError("No Protobuf folder")
+        #endif
     else:
         raise ValueError(tensorflow_models_folder + "does not exist possible error in checkput")
+    #endif
 	
     if os.path.exists(tensorflow_models_folder):
         add_folders = ["","research","research/slim","research/object_detection"]
@@ -66,7 +77,7 @@ def load_API(tensorflow_models_folder):
                 print("Add path " + new_path)
             #end if
         #end for
-        print(sys.path)  
+        #print(sys.path)  
     else:
         raise ValueError(tensorflow_models_folder + "does not exist")
 
