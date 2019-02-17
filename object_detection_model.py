@@ -10,33 +10,54 @@ import numpy as np
 import os
 
 
+def temprature_hook():
+    import wmi
+    import time
+    w = wmi.WMI(namespace="root\OpenHardwareMonitor")
+    #init with 50 degree to start while
+    temp_dict = {}
+    temp_to_high = True
+    while temp_to_high :
+        temp_to_high = False
+        temperature_infos = w.Sensor()
+        for sensor in temperature_infos:
+            if sensor.SensorType==u'Temperature':
+                temp_dict[sensor.Name]=sensor.Value
+                print("Temp: " + sensor.Name + " " + str(sensor.Value))
+        for temp_key in temp_dict:
+            if temp_dict[temp_key]>80:
+                time.sleep(15)
+                temp_to_high=True
+
+
 class LocationModel:
 
-    def __init__(self,model_folder):
-        self.model_folder = os.path.join(os.getcwd(),model_folder);
-        if not os.path.exists(self.model_folder):
-            os.makedirs(self.model_folder)
+    def __init__(self,model_application):
+        self.model_application = os.path.join(os.getcwd(),model_application);
+        if not os.path.exists(self.model_application):
+            os.makedirs(self.model_application)
         else:
             pass
             #to do check for model in folder because it is already there
-#########################################################################	
-#    Description: 
-#						Init object detection model
-#    Class Variables: 
-#						graph --> contains the graph for a tensorflow session
-#                   	image_tensor --> input tensor of graph
-#                  		detection_boxes --> output tensor of graph
-#                    	detection_scores --> output tensor of graph
-#                    	detection_classes --> output tensor of graph
-#                    	num_detections --> output tensor of graph
-#                    	category_index --> contains labels
-#    Input Args:
-#						modelfile --> contains the inference graph as a.pb file
-#          				label_map --> contains the label map for the model as a .pbtxt file
-#    Output Args: 
-#						none
-#########################################################################
-    def init_model(self,currentmodel):
+			
+    ###########################################################################	
+    #    Description: 
+    #						Init object detection model
+    #    Class Variables: 
+    #						graph --> contains the graph for a tensorflow session
+    #                   	image_tensor --> input tensor of graph
+    #                  		detection_boxes --> output tensor of graph
+    #                    	detection_scores --> output tensor of graph
+    #                    	detection_classes --> output tensor of graph
+    #                    	num_detections --> output tensor of graph
+    #                    	category_index --> contains labels
+    #    Input Args:
+    #						active_model --> contains the inference graph as a.pb file
+    #          				lap_pbtxt_file --> contains the label map for the model as a .pbtxt file
+    #    Output Args: 
+    #						none
+    ###########################################################################
+    def init_model(self,active_model,lap_pbtxt_file = ""):
         from utils import label_map_util
         #get names from layers.txt
         input_tensor_name = "image_tensor"
@@ -45,7 +66,11 @@ class LocationModel:
         detection_classes_name = "detection_classes"
         num_detections_name = "num_detections"
         self.graph = tf.Graph()
-        modelfile = os.path.join(self.model_folder,currentmodel,"model","frozen_inference_graph.pb")
+        model_folder_location = os.path.join(self.model_application,active_model,"model")
+        modelfile = os.path.join(model_folder_location,"frozen_inference_graph.pb")
+        if not os.path.isfile(modelfile):
+            model_folder_location = os.path.join(self.model_application,active_model)            
+            modelfile = os.path.join(model_folder_location,"frozen_inference_graph.pb")                
         with self.graph.as_default():
             with tf.gfile.FastGFile(modelfile,'rb') as model:
                 # The graph-def is a saved copy of a TensorFlow graph.
@@ -64,14 +89,22 @@ class LocationModel:
         self.detection_classes = self.graph.get_tensor_by_name(detection_classes_name + ":0")
         self.num_detections = self.graph.get_tensor_by_name(num_detections_name + ":0")
         #get labels
-        #TENSORFLOW_OBJECT_DETECTION_API = "C:/Users/Florian/Documents/Tensorflow/tensorflow_api/models/research/object_detection/"
-        #LABEL_MAP_LOC = os.path.join(TENSORFLOW_OBJECT_DETECTION_API,"data/mscoco_label_map.pbtxt")
-        label_map = label_map_util.load_labelmap(os.path.join(self.model_folder,'label_map.pbtxt'))
-        NUM_CLASSES = 90
+        #TODO use old models and new models with labemap only search for pbtxt and show error in export model also copy label map
+        for file in os.listdir(model_folder_location):
+            if file.endswith('.pbtxt'):
+                lap_pbtxt_file = os.path.join(model_folder_location,file)
+        
+        if not lap_pbtxt_file:
+            raise ValueError("No label file with .pbtxt ending is found in the folder or given location")
+                
+                
+        label_map = label_map_util.load_labelmap(lap_pbtxt_file)
+        NUM_CLASSES = label_map_util.get_max_label_map_index(label_map)
         categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
         self.category_index = label_map_util.create_category_index(categories)
+    ###########################################################################
     
-    #############################################################
+    ###########################################################################
     #Function Name: localize
     #Description: this is to use the model and localize returns the 10 highest 
     #     predictions
@@ -81,7 +114,7 @@ class LocationModel:
     #        scores --> number of score
     #        classes --> class label
     #        num -->
-    ##############################################################
+    ###########################################################################
     def localize(self,_image):
         image_expanded = np.expand_dims(_image, axis=0)
         with tf.Session(graph=self.graph) as sess:
@@ -96,8 +129,9 @@ class LocationModel:
         classes = np.squeeze(classes).astype(np.int32)
         classes = classes[0:10]
         return (boxes, scores, classes, num)
+    ###########################################################################
     
-    #############################################################
+    ###########################################################################
     #Function Name: perpare_training
     #Description: this is to prepeare the training data
     #             it creates tf record files for training
@@ -105,7 +139,7 @@ class LocationModel:
     #Input: training_data --> folder with training data
     #       test_data --> folder with test data
     #Output: none
-    ##############################################################
+    ###########################################################################
     def perpare_training(self,train_data,test_data):   
         import shutil
         self.labels = []          
@@ -138,91 +172,128 @@ class LocationModel:
         train_record = self._csv_to_tfRecord(train_data)
         test_record = self._csv_to_tfRecord(test_data)
         
-        shutil.copy2(labelmap, os.path.join(self.model_folder,os.path.basename(labelmap)))
-        shutil.copy2(train_record, os.path.join(self.model_folder,os.path.basename(train_record)))
-        shutil.copy2(test_record, os.path.join(self.model_folder,os.path.basename(test_record)))
+        shutil.copy2(labelmap, os.path.join(self.model_application,os.path.basename(labelmap)))
+        shutil.copy2(train_record, os.path.join(self.model_application,os.path.basename(train_record)))
+        shutil.copy2(test_record, os.path.join(self.model_application,os.path.basename(test_record)))
+    ###########################################################################
         
-    def train(self):
-        from object_detection.legacy import train
-		#from object_detection import model_main
+    ###########################################################################
+    #Function Name: training_flow
+    #Description: trains the neuronal network
+    #Class Variables: none
+    #Input: training_flow --> choose between legacy and new
+    #LogSettings: Hanlde logging chosse [tensorflow,system,all] to log to file
+    #Output: none
+    ###########################################################################    
+    def train(self,training_flow,log_settings):
         import datetime
         import re
         
         #dir_path = os.path.dirname(os.path.realpath(__file__))
-        self.config_file = os.path.join(self.model_folder,"pipeline.config")
+        config_file = os.path.join(self.model_application,"pipeline.config")
         
         #get time of training start
         now = datetime.datetime.now()
         now_str= '_'.join([str(now.year),str(now.month),str(now.day),str(now.hour),str(now.minute)])
         
-        with open(self.config_file, 'r+') as config:
+        with open(config_file, 'r+') as config:
             txt = config.read()
             model = re.findall(r'type\:\s\"\w+\"',txt)
+            if not model:
+                model = re.findall(r'type\:\s\'\w+\'',txt)
             model = model[0].split()[1]
             model = re.sub('\W+','', model )
             
-        txt = re.sub('\.\/', self.model_folder.replace(os.path.sep, '/')+'/', txt)
+        txt = re.sub('\.\/', self.model_application.replace(os.path.sep, '/')+'/', txt)
         
-        with open(self.config_file, 'w') as config:
+        with open(config_file, 'w') as config:
             config.write(txt)
             
         
         folder_name = model + '_ownData_' + now_str
         
-        save_folder =  os.path.join(self.model_folder,folder_name)
+        save_folder =  os.path.join(self.model_application,folder_name)
         save_folder = save_folder.replace(os.path.sep, '/')
-        
-        if not os.path.exists(save_folder):
-            os.mkdir(save_folder)
-        
+              
         save_folder_checkpoints = os.path.join(save_folder,'checkpoints')
         save_folder_checkpoints = save_folder_checkpoints.replace(os.path.sep, '/')
+        #from https://github.com/datitran/raccoon_dataset/issues/41
+        #prevent more then 260 characters in path
+        #new training uses longer names
+        if save_folder_checkpoints.count('')>260-150 and training_flow!="old":
+            save_folder =  os.path.join(self.model_application,now_str)
+            save_folder_checkpoints = os.path.join(save_folder,'checkpoints')
+            save_folder_checkpoints = save_folder_checkpoints.replace(os.path.sep, '/')
+                
+        if not os.path.exists(save_folder):
+            os.mkdir(save_folder)    
+            
         if not os.path.exists(save_folder_checkpoints):
             os.mkdir(save_folder_checkpoints)
 		
-		#from https://stackoverflow.com/questions/40559667/how-to-redirect-tensorflow-logging-to-a-file
-        import logging
-
-        # get TF logger
-        log = logging.getLogger('tensorflow')
-        log.setLevel(logging.DEBUG)
-
-        # create formatter and add it to the handlers
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-        # create file handler which logs even debug messages
-        logfile = os.path.join(save_folder_checkpoints,'tensorflow.log')
-        print(logfile)
-        fh = logging.FileHandler(logfile)
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(formatter)
-        log.addHandler(fh)
+        if log_settings == 'all' or log_settings=='tensorflow':        
+            #from https://stackoverflow.com/questions/40559667/how-to-redirect-tensorflow-logging-to-a-file
+            import logging
+            # get TF logger
+            log = logging.getLogger('tensorflow')
+            log.setLevel(logging.DEBUG)
+            # create formatter and add it to the handlers
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            # create file handler which logs even debug messages
+            logfile = os.path.join(save_folder_checkpoints,'tensorflow.log')
+            print(logfile)
+            fh = logging.FileHandler(logfile)
+            fh.setLevel(logging.DEBUG)
+            fh.setFormatter(formatter)
+            log.addHandler(fh)
 	
-	#from https://www.thecodingforums.com/threads/how-to-change-redirect-stderr.355342/#post-1868822
-        import sys
-        logfile = os.path.join(save_folder_checkpoints,'logfile.log')
-        sys.stderr.flush()
-        err = open(logfile, 'a+', 1)
-        os.dup2(err.fileno(), sys.stderr.fileno())
+        if log_settings == 'all' or log_settings=='system':
+            	#from https://www.thecodingforums.com/threads/how-to-change-redirect-stderr.355342/#post-1868822
+            import sys
+            logfile = os.path.join(save_folder_checkpoints,'logfile.log')
+            sys.stderr.flush()
+            err = open(logfile, 'a+', 1)
+            #get file descriptor https://www.tutorialspoint.com/python/file_fileno.htm
+            fid_err = err.fileno()
+            fid_stderr = sys.stderr.fileno()
+            #copies files with file descriptors https://www.tutorialspoint.com/python/os_dup2.htm
+            os.dup2(fid_err, fid_stderr)
+    		
+        if training_flow == 'old':
+            from object_detection.legacy import train
+            flags = tf.app.flags
+            FLAGS = flags.FLAGS
+            FLAGS.train_dir = save_folder_checkpoints
+            FLAGS.pipeline_config_path = config_file
+            train.main(None)
+        elif training_flow == 'new':
+            from object_detection import model_main
+            import sys
+            FLAGS = tf.app.flags.FLAGS
+            FLAGS.model_dir = save_folder_checkpoints
+            FLAGS.pipeline_config_path = config_file
+            #from https://github.com/google/python-gflags/issues/37
+            FLAGS(sys.argv)
+            model_main.main(None)
+        else:
+            raise ValueError('''Wrong input choose between 'old' and 'new' training''')
+    #end train
+    ###########################################################################
 
-		#alte schreibeweiße und dann auch unten flags anstatt FLAGS
-        #flags = tf.app.flags.FLAGS
-        flags = tf.app.flags
-        FLAGS = flags.FLAGS
-        # this is for model_main
-        #FLAGS.model_dir = save_folder_checkpoints
-        # this is for train main
-        FLAGS.train_dir = save_folder_checkpoints
-        FLAGS.pipeline_config_path = self.config_file
-        train.main(None)
-        #model_main.main(None)
-        
-    def export_model(self,active_folder):
+    ###########################################################################
+    #Function Name: export_model
+    #Description: freeze checkpoint to model
+    #Class Variables: none
+    #Input: active_model --> choose a trained model
+    #Output: none    
+    ###########################################################################
+    def export_model(self,active_model):
+        from shutil import copyfile
         from google.protobuf import text_format
         from object_detection import exporter
         from object_detection.protos import pipeline_pb2
         
-        model_folder = os.path.join(os.getcwd(),self.model_folder,active_folder)
+        model_folder = os.path.join(os.getcwd(),self.model_application,active_model)
         
         
         checkpoint_folder = os.path.join(model_folder,'checkpoints')
@@ -256,29 +327,58 @@ class LocationModel:
             
         input_type = "image_tensor"
         exporter.export_inference_graph(input_type, trainEvalPipelineConfig, checkpoint, output_folder)
-        
-    def eval_model(self,train_folder):
+
+        copyfile(os.path.join(self.model_application,"label_map.pbtxt"),os.path.join(output_folder,"label_map.pbtxt"))
+    
+    
+    ###########################################################################
+    #Function Name: eval_model
+    #Description: runs the evaluation for a model
+    #Class Variables: none
+    #Input: active_model --> choose a trained model
+    #       log --> enable or disable log
+    #Output: none    
+    ###########################################################################  
+    def eval_model(self,active_model,log=True):
         import object_detection.legacy.eval as eval_model
         import logging
         
         logging.basicConfig(level=logging.DEBUG)
         
-        checkpoint_dir = os.path.join(self.model_folder,train_folder,'checkpoints').replace(os.path.sep, '/')
+        checkpoint_dir = os.path.join(self.model_application,active_model,'checkpoints').replace(os.path.sep, '/')
         
-        eval_dir = os.path.join(self.model_folder,train_folder,"eval").replace(os.path.sep, '/')
+        eval_dir = os.path.join(self.model_application,active_model,"eval").replace(os.path.sep, '/')
         if not os.path.exists(eval_dir):
             os.mkdir(eval_dir)
         
-        pipeline = os.path.join(self.model_folder,train_folder,'checkpoints','pipeline.config').replace(os.path.sep, '/')
+        if log:        
+            #from https://stackoverflow.com/questions/40559667/how-to-redirect-tensorflow-logging-to-a-file
+            import logging
+            # get TF logger
+            log = logging.getLogger('tensorflow')
+            log.setLevel(logging.DEBUG)
+            # create formatter and add it to the handlers
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            # create file handler which logs even debug messages
+            logfile = os.path.join(eval_dir,'tensorflow.log')
+            print(logfile)
+            fh = logging.FileHandler(logfile)
+            fh.setLevel(logging.DEBUG)
+            fh.setFormatter(formatter)
+            log.addHandler(fh)
+        
         
         flags = tf.app.flags.FLAGS
         flags.checkpoint_dir = checkpoint_dir
         flags.eval_dir = eval_dir
+        
+        pipeline = os.path.join(self.model_application,active_model,'checkpoints','pipeline.config').replace(os.path.sep, '/')
         flags.pipeline_config_path = pipeline
-        eval_model.main(None) 
+        eval_model.main(None)
+    ###########################################################################
         
     ###########################################################################
-    #from 
+    #from https://github.com/MicrocontrollersAndMore/TensorFlow_Tut_3_Object_Detection_Walk-through
     def _xml_to_csv(self,path,csv_name):
         import glob
         import pandas as pd
@@ -309,6 +409,7 @@ class LocationModel:
     ###########################################################################
 
     ###########################################################################
+    #from https://github.com/MicrocontrollersAndMore/TensorFlow_Tut_3_Object_Detection_Walk-through
     def _csv_to_tfRecord(self,path):
         from collections import namedtuple
         import pandas as pd
@@ -356,6 +457,7 @@ class LocationModel:
     ###########################################################################
 
     ###########################################################################
+    #from https://github.com/MicrocontrollersAndMore/TensorFlow_Tut_3_Object_Detection_Walk-through
     def _createTfExample(self,singleFileData, path):
         import io
         from object_detection.utils import dataset_util
@@ -416,6 +518,7 @@ class LocationModel:
 
 
     ###########################################################################
+    #from https://github.com/MicrocontrollersAndMore/TensorFlow_Tut_3_Object_Detection_Walk-through
     def _create_lablemap(self,lables,train_location,test_location):
         label_text = ""
         i=1
@@ -435,43 +538,46 @@ class LocationModel:
     ###########################################################################
 
 if __name__ == "__main__":
-    cnn_model = LocationModel('mouse_detection_model')
-    cnn_model.perpare_training('./data/train','./data/test')
-    #cnn_model.train()
-    #current_model = "model__faster_rcnn_inception_v2_2018_9_14_13_42"
-    #cnn_model.export_model(current_model)
-    #cnn_model.eval_model(current_model)
+    cnn_model = LocationModel('mouse_cat_detection_model')
+    #cnn_model.perpare_training('./data/train','./data/test')
+    cnn_model.train('new','tensorflow')
+#    current_model = "ssd_mobilenet_v2_ownData_2019_1_28_18_46"
+#    cnn_model.export_model(current_model)
+#    cnn_model.eval_model(current_model)
     
-    #model = os.path.join(os.getcwd(),'model/object_detection/faster_rcnn_inception_v2_coco/frozen_inference_graph.pb')
-    #TENSORFLOW_OBJECT_DETECTION_API = "C:/Users/Florian/Documents/Tensorflow/tensorflow_api/models/research/object_detection/"
-    #labels = os.path.join(TENSORFLOW_OBJECT_DETECTION_API,"data/mscoco_label_map.pbtxt")
-
+###############################################################################
+# Test Function to test all pictures in eval folder
+###############################################################################
+#
 #    cnn_model.init_model(current_model)
 #    #read image
-#    for file in os.listdir(os.getcwd()):
+#    for file in os.listdir(os.path.join(os.getcwd(),cnn_model.model_folder,"eval")):
 #        if file.endswith(('.png', '.jpg', '.jpeg','.JPG')):
-#            image_path= file
-#    import cv2
-#    image = cv2.imread(image_path)
-#    # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
-#    (boxes, scores, classes, num) = cnn_model.localize(image)
-#    
-#    from utils import visualization_utils as vis_util
-#    # Visualization of the results of a detection.
-#    vis_util.visualize_boxes_and_labels_on_image_array(image,
-#                                                       boxes,
-#                                                       classes,
-#                                                       scores,
-#                                                       cnn_model.category_index,
-#                                                       use_normalized_coordinates=True,
-#                                                       line_thickness=8,
-#                                                       min_score_thresh=.8)
-#    #reizse image to fit screen
-#    height, width, channels = image.shape 
-#    if height > 500 and width > 500:
-#        re_height = 500/height
-#        re_width = 500/width
-#        image = cv2.resize(image,(0,0), fx=re_height, fy=re_width,interpolation=cv2.INTER_LINEAR)
-#    cv2.imshow("result", image)
-#    cv2.waitKey()
-#    cv2.destroyAllWindows()
+#            image_path= os.path.join(os.getcwd(),cnn_model.model_folder,"eval",file)
+#            import cv2
+#            image = cv2.imread(image_path)
+#            # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
+#            (boxes, scores, classes, num) = cnn_model.localize(image)
+#            
+#            from utils import visualization_utils as vis_util
+#            # Visualization of the results of a detection.
+#            vis_util.visualize_boxes_and_labels_on_image_array(image,
+#                                                               boxes,
+#                                                               classes,
+#                                                               scores,
+#                                                               cnn_model.category_index,
+#                                                               use_normalized_coordinates=True,
+#                                                               line_thickness=2,
+#                                                               min_score_thresh=.80)
+#            #reizse image to fit screen
+#            height, width, channels = image.shape 
+#            if height > 500 and width > 500:
+#                re_height = 500/height
+#                re_width = 500/width
+#                image = cv2.resize(image,(0,0), fx=re_height, fy=re_width,interpolation=cv2.INTER_LINEAR)
+#            cv2.imshow("result", image)
+#            #show 3 sec = 3000ms
+#            cv2.waitKey(3000)
+#            cv2.destroyAllWindows()
+#            eval_dir = os.path.join(cnn_model.model_folder,current_model,"eval").replace(os.path.sep, '/')
+#            cv2.imwrite(os.path.join(eval_dir,file),image)
